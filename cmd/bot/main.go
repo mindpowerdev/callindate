@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"time"
+	_ "time/tzdata" // зашивает базу часовых поясов IANA в бинарник — на минимальных Docker-образах (Railway и т.п.) её может не быть на диске
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
