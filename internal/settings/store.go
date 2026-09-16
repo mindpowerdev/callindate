@@ -1,5 +1,6 @@
-// Package settings хранит небольшие настройки бота (chat_id, время напоминаний и т.д.)
-// в виде ключ-значение — бот рассчитан на один чат/семью, поэтому без пользователей и профилей.
+// Package settings хранит небольшие настройки бота (список чатов-подписчиков на напоминания,
+// время напоминаний и т.д.). Данные в других пакетах (schedule, payment) общие для всех, кто
+// пишет боту — это не «настройки пользователя», а именно общие параметры бота.
 package settings
 
 import (
@@ -19,6 +20,9 @@ type Store struct {
 func NewStore(db *sql.DB) (*Store, error) {
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		return nil, err
+	}
+	if err := s.migrateSubscribers(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -68,26 +72,6 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("удаление настройки %q: %w", key, err)
 	}
 	return nil
-}
-
-const keyChatID = "chat_id"
-
-// ChatID возвращает сохранённый чат бота (0, false — если бот ещё не запускали через /start).
-func (s *Store) ChatID(ctx context.Context) (int64, bool, error) {
-	value, ok, err := s.Get(ctx, keyChatID)
-	if err != nil || !ok {
-		return 0, false, err
-	}
-	var id int64
-	if _, err := fmt.Sscanf(value, "%d", &id); err != nil {
-		return 0, false, fmt.Errorf("разбор chat_id: %w", err)
-	}
-	return id, true, nil
-}
-
-// SetChatID сохраняет чат, в который бот шлёт напоминания.
-func (s *Store) SetChatID(ctx context.Context, chatID int64) error {
-	return s.Set(ctx, keyChatID, fmt.Sprintf("%d", chatID))
 }
 
 const keyDailyReminderTime = "daily_reminder_time"

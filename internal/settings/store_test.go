@@ -22,15 +22,29 @@ func TestSmoke(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if _, ok, err := store.ChatID(ctx); err != nil || ok {
-		t.Fatalf("chat_id не должен быть задан изначально: ok=%v err=%v", ok, err)
+	subs, err := store.Subscribers(ctx)
+	if err != nil || len(subs) != 0 {
+		t.Fatalf("подписчиков не должно быть изначально: %v (err=%v)", subs, err)
 	}
-	if err := store.SetChatID(ctx, 12345); err != nil {
+	if err := store.AddSubscriber(ctx, 111); err != nil {
 		t.Fatal(err)
 	}
-	id, ok, err := store.ChatID(ctx)
-	if err != nil || !ok || id != 12345 {
-		t.Fatalf("ChatID = %d, %v, %v", id, ok, err)
+	if err := store.AddSubscriber(ctx, 222); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSubscriber(ctx, 111); err != nil { // повторное добавление не должно плодить дубликаты
+		t.Fatal(err)
+	}
+	subs, err = store.Subscribers(ctx)
+	if err != nil || len(subs) != 2 || subs[0] != 111 || subs[1] != 222 {
+		t.Fatalf("Subscribers = %v (err=%v)", subs, err)
+	}
+	if err := store.RemoveSubscriber(ctx, 111); err != nil {
+		t.Fatal(err)
+	}
+	subs, err = store.Subscribers(ctx)
+	if err != nil || len(subs) != 1 || subs[0] != 222 {
+		t.Fatalf("Subscribers после удаления = %v (err=%v)", subs, err)
 	}
 
 	dailyTime, err := store.DailyReminderTime(ctx)

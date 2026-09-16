@@ -60,13 +60,15 @@ func (b *Bot) Run() {
 func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	switch message.Command() {
 	case "start":
-		if err := b.settings.SetChatID(context.Background(), message.Chat.ID); err != nil {
-			log.Printf("ошибка сохранения chat_id: %v", err)
+		if err := b.settings.AddSubscriber(context.Background(), message.Chat.ID); err != nil {
+			log.Printf("ошибка подписки на напоминания: %v", err)
 		}
 
 		msg := tgbotapi.NewMessage(
 			message.Chat.ID,
-			"Привет! Я помогу вести учёт детских кружков и секций.",
+			"Привет! Я помогу вести учёт детских кружков и секций.\n\n"+
+				"Все данные общие: если этому боту напишет кто-то ещё из семьи, он увидит и сможет "+
+				"менять то же расписание и оплаты, и тоже будет получать напоминания.",
 		)
 		msg.ReplyMarkup = mainMenuKeyboard()
 		b.send(msg)
@@ -83,7 +85,8 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 				"/plan per_visit <сумма_за_занятие> <название>\n"+
 				"/plan one_time <сумма> <ДД.ММ.ГГГГ> <название>\n"+
 				"/plan remove <название>\n\n"+
-				"Время ежедневной сводки:\n/remind_time <ЧЧ:ММ>",
+				"Время ежедневной сводки:\n/remind_time <ЧЧ:ММ>\n\n"+
+				"Отписаться от напоминаний в этом чате:\n/stop",
 		)
 
 	case "add":
@@ -98,8 +101,16 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	case "remind_time":
 		b.handleRemindTimeCommand(message)
 
+	case "stop":
+		if err := b.settings.RemoveSubscriber(context.Background(), message.Chat.ID); err != nil {
+			log.Printf("ошибка отписки от напоминаний: %v", err)
+			b.reply(message.Chat.ID, "Не получилось отписаться, попробуй ещё раз.")
+			return
+		}
+		b.reply(message.Chat.ID, "Ок, напоминания в этот чат больше не приходят. Данные и меню остаются доступны — вернуться можно через /start.")
+
 	default:
-		b.reply(message.Chat.ID, "Я пока понимаю только команды /start, /help, /add, /pay, /plan и /remind_time.")
+		b.reply(message.Chat.ID, "Я пока понимаю только команды /start, /help, /add, /pay, /plan, /remind_time и /stop.")
 	}
 }
 

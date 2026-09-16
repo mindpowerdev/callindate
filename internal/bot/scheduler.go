@@ -27,19 +27,26 @@ func (b *Bot) runScheduler(ctx context.Context) {
 }
 
 func (b *Bot) checkReminders(ctx context.Context, now time.Time) {
-	chatID, ok, err := b.settings.ChatID(ctx)
+	chatIDs, err := b.settings.Subscribers(ctx)
 	if err != nil {
-		log.Printf("ошибка получения chat_id: %v", err)
+		log.Printf("ошибка получения подписчиков: %v", err)
 		return
 	}
-	if !ok {
-		return // бот ещё не запускали через /start — некому слать напоминания
+	if len(chatIDs) == 0 {
+		return // никто ещё не запускал бота через /start — некому слать напоминания
 	}
 
-	b.checkDailyDigest(ctx, chatID, now)
-	b.checkHourReminders(ctx, chatID, now)
-	b.checkPaymentDue(ctx, chatID, now)
-	b.checkLowBalance(ctx, chatID)
+	b.checkDailyDigest(ctx, chatIDs, now)
+	b.checkHourReminders(ctx, chatIDs, now)
+	b.checkPaymentDue(ctx, chatIDs, now)
+	b.checkLowBalance(ctx, chatIDs)
+}
+
+// broadcast шлёт один и тот же текст всем подписчикам.
+func (b *Bot) broadcast(chatIDs []int64, text string) {
+	for _, chatID := range chatIDs {
+		b.reply(chatID, text)
+	}
 }
 
 // dueDailyDigest — пора ли слать ежедневную сводку: текущее время не раньше настроенного,
@@ -52,7 +59,7 @@ func dueDailyDigest(now time.Time, dailyTime string, lastSentDate string) bool {
 	return now.Format("15:04") >= dailyTime
 }
 
-func (b *Bot) checkDailyDigest(ctx context.Context, chatID int64, now time.Time) {
+func (b *Bot) checkDailyDigest(ctx context.Context, chatIDs []int64, now time.Time) {
 	dailyTime, err := b.settings.DailyReminderTime(ctx)
 	if err != nil {
 		log.Printf("ошибка получения времени сводки: %v", err)
@@ -67,7 +74,7 @@ func (b *Bot) checkDailyDigest(ctx context.Context, chatID int64, now time.Time)
 		return
 	}
 
-	b.reply(chatID, b.dailyDigestText(ctx, now))
+	b.broadcast(chatIDs, b.dailyDigestText(ctx, now))
 
 	if err := b.settings.SetLastDailyDigestDate(ctx, now.Format("2006-01-02")); err != nil {
 		log.Printf("ошибка сохранения даты последней сводки: %v", err)
@@ -142,7 +149,7 @@ func hourReminderDue(now, startAt time.Time, alreadySent bool) bool {
 	return remaining > 0 && remaining <= time.Hour
 }
 
-func (b *Bot) checkHourReminders(ctx context.Context, chatID int64, now time.Time) {
+func (b *Bot) checkHourReminders(ctx context.Context, chatIDs []int64, now time.Time) {
 	occurrences, err := b.schedule.EnsureOccurrencesForDate(ctx, startOfDay(now))
 	if err != nil {
 		log.Printf("ошибка получения занятий на сегодня: %v", err)
@@ -161,7 +168,7 @@ func (b *Bot) checkHourReminders(ctx context.Context, chatID int64, now time.Tim
 			continue
 		}
 
-		b.reply(chatID, fmt.Sprintf("⏰ Через час: %s в %s", o.ActivityName, o.StartTime))
+		b.broadcast(chatIDs, fmt.Sprintf("⏰ Через час: %s в %s", o.ActivityName, o.StartTime))
 		if err := b.schedule.MarkHourReminderSent(ctx, o.ID); err != nil {
 			log.Printf("ошибка отметки напоминания за час: %v", err)
 		}
@@ -178,7 +185,7 @@ func dueSoon(now, nextDueDate time.Time, remindedFor *time.Time, withinDays int)
 	return daysLeft >= 0 && daysLeft <= withinDays
 }
 
-func (b *Bot) checkPaymentDue(ctx context.Context, chatID int64, now time.Time) {
+func (b *Bot) checkPaymentDue(ctx context.Context, chatIDs []int64, now time.Time) {
 	plans, err := b.payments.AllPlans(ctx)
 	if err != nil {
 		log.Printf("ошибка получения планов оплаты: %v", err)
@@ -194,7 +201,7 @@ func (b *Bot) checkPaymentDue(ctx context.Context, chatID int64, now time.Time) 
 		}
 
 		days := int(startOfDay(*p.NextDueDate).Sub(startOfDay(now)).Hours() / 24)
-		b.reply(chatID, fmt.Sprintf("💳 %s — оплатить %s ₽ %s", p.ActivityName, payment.FormatAmount(p.Amount), dueInWords(days)))
+		b.broadcast(chatIDs, fmt.Sprintf("💳 %s — оплатить %s ₽ %s", p.ActivityName, payment.FormatAmount(p.Amount), dueInWords(days)))
 
 		if err := b.payments.MarkDueReminderSent(ctx, p.ActivityName, *p.NextDueDate); err != nil {
 			log.Printf("ошибка отметки напоминания об оплате: %v", err)
@@ -213,7 +220,7 @@ func dueInWords(daysLeft int) string {
 	}
 }
 
-func (b *Bot) checkLowBalance(ctx context.Context, chatID int64) {
+func (b *Bot) checkLowBalance(ctx context.Context, chatIDs []int64) {
 	plans, err := b.payments.AllPlans(ctx)
 	if err != nil {
 		log.Printf("ошибка получения планов оплаты: %v", err)
@@ -228,7 +235,7 @@ func (b *Bot) checkLowBalance(ctx context.Context, chatID int64) {
 			continue
 		}
 
-		b.reply(chatID, fmt.Sprintf(
+		b.broadcast(chatIDs, fmt.Sprintf(
 			"⚠️ У «%s» осталось %d %s по абонементу.",
 			p.ActivityName, p.LessonsRemaining, payment.LessonsWord(p.LessonsRemaining),
 		))

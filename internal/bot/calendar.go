@@ -122,12 +122,13 @@ func (b *Bot) handleAttendanceCallback(chatID int64, data, prefix string, status
 	if status != schedule.StatusAttended && status != schedule.StatusMissed {
 		return
 	}
-	b.consumeAbonementLesson(ctx, chatID, updated.ActivityName)
+	b.consumeAbonementLesson(ctx, updated.ActivityName)
 }
 
 // consumeAbonementLesson списывает одно занятие с абонемента кружка (если он на нём оформлен)
-// и шлёт предупреждение, когда остаток впервые опускается до порога.
-func (b *Bot) consumeAbonementLesson(ctx context.Context, chatID int64, activityName string) {
+// и рассылает всем подписчикам предупреждение, когда остаток впервые опускается до порога
+// (не только тому, кто отметил посещаемость, — это должны видеть оба родителя).
+func (b *Bot) consumeAbonementLesson(ctx context.Context, activityName string) {
 	plan, ok, err := b.payments.PlanByName(ctx, activityName)
 	if err != nil {
 		log.Printf("ошибка получения плана оплаты: %v", err)
@@ -151,7 +152,11 @@ func (b *Bot) consumeAbonementLesson(ctx context.Context, chatID int64, activity
 	}
 
 	if updated.LessonsRemaining <= lowBalanceThreshold && !updated.LowBalanceReminded {
-		b.reply(chatID, fmt.Sprintf(
+		chatIDs, err := b.settings.Subscribers(ctx)
+		if err != nil {
+			log.Printf("ошибка получения подписчиков: %v", err)
+		}
+		b.broadcast(chatIDs, fmt.Sprintf(
 			"⚠️ У «%s» осталось %d %s по абонементу.",
 			activityName, updated.LessonsRemaining, payment.LessonsWord(updated.LessonsRemaining),
 		))
