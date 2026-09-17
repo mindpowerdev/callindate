@@ -81,6 +81,41 @@ GROUP BY activity_name
 	return result, nil
 }
 
+// PricePerLesson возвращает среднюю цену одного занятия по каждому кружку — сумму всех платежей
+// за кружок, делённую на суммарное оплаченное количество занятий (по всей истории платежей, а не
+// только за период отчёта: абонемент оплачивается один раз на много занятий вперёд, и цена
+// занятия не должна зависеть от того, сколько из них уже посетили в конкретном отчётном периоде).
+func (s *Store) PricePerLesson(ctx context.Context) (map[string]float64, error) {
+	const q = `
+SELECT activity_name, SUM(amount), SUM(lessons_count)
+FROM payments
+GROUP BY activity_name
+`
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("получение цены занятия по кружкам: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]float64)
+	for rows.Next() {
+		var name string
+		var amount float64
+		var lessons int
+		if err := rows.Scan(&name, &amount, &lessons); err != nil {
+			return nil, fmt.Errorf("чтение цены занятия по кружкам: %w", err)
+		}
+		if lessons > 0 {
+			result[name] = amount / float64(lessons)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("чтение цены занятия по кружкам: %w", err)
+	}
+
+	return result, nil
+}
+
 // Recent возвращает последние платежи, отсортированные от новых к старым.
 func (s *Store) Recent(ctx context.Context, limit int) ([]Payment, error) {
 	const q = `SELECT id, activity_name, amount, lessons_count, paid_at FROM payments ORDER BY paid_at DESC, id DESC LIMIT ?`

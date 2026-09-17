@@ -16,7 +16,9 @@ import (
 type ActivityStats struct {
 	Name string
 	schedule.Counts
-	Spent float64
+	Spent          float64 // цена занятия × посещено за период (см. PricePerLesson)
+	PricePerLesson float64
+	HasPrice       bool
 }
 
 // Report — статистика за период по всем кружкам плюс итоги.
@@ -27,32 +29,38 @@ type Report struct {
 	TotalAttended int
 }
 
-// CostPerVisit возвращает среднюю стоимость одного фактического посещения по кружку
-// (0, если посещений не было — делить не на что).
+// CostPerVisit возвращает цену одного занятия по кружку (см. payment.Store.PricePerLesson;
+// false, если по кружку ещё нет ни одного платежа).
 func (a ActivityStats) CostPerVisit() (float64, bool) {
-	if a.Attended == 0 {
+	if !a.HasPrice {
 		return 0, false
 	}
-	return a.Spent / float64(a.Attended), true
+	return a.PricePerLesson, true
 }
 
-// BuildReport считает план/факт по расписанию и траты по платежам за [from, to] (обе даты включительно).
+// BuildReport считает план/факт по расписанию за [from, to] (обе даты включительно) и траты —
+// как цену занятия (по всей истории платежей кружка) на фактически посещённые в периоде занятия.
 func BuildReport(ctx context.Context, scheduleStore *schedule.Store, paymentStore *payment.Store, from, to time.Time) (Report, error) {
 	counts, err := scheduleStore.StatsForRange(ctx, from, to)
 	if err != nil {
 		return Report{}, fmt.Errorf("статистика посещаемости: %w", err)
 	}
 
-	spent, err := paymentStore.SumByActivity(ctx, from, to)
+	periodPayments, err := paymentStore.SumByActivity(ctx, from, to)
 	if err != nil {
 		return Report{}, fmt.Errorf("статистика трат: %w", err)
 	}
 
-	names := make(map[string]struct{}, len(counts)+len(spent))
+	prices, err := paymentStore.PricePerLesson(ctx)
+	if err != nil {
+		return Report{}, fmt.Errorf("статистика цены занятия: %w", err)
+	}
+
+	names := make(map[string]struct{}, len(counts)+len(periodPayments))
 	for name := range counts {
 		names[name] = struct{}{}
 	}
-	for name := range spent {
+	for name := range periodPayments {
 		names[name] = struct{}{}
 	}
 
@@ -61,7 +69,11 @@ func BuildReport(ctx context.Context, scheduleStore *schedule.Store, paymentStor
 		as := ActivityStats{
 			Name:   name,
 			Counts: counts[name],
-			Spent:  spent[name],
+		}
+		if price, ok := prices[name]; ok {
+			as.PricePerLesson = price
+			as.HasPrice = true
+			as.Spent = price * float64(as.Attended)
 		}
 		report.Activities = append(report.Activities, as)
 		report.TotalSpent += as.Spent
